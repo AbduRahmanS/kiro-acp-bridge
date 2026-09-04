@@ -1,0 +1,62 @@
+{
+  "name": "kiro-acp-bridge",
+  "version": "0.1.0",
+  "description": "Standards-compliant ACP bridge that gives Zed the full Kiro experience: native model, reasoning-effort and agent selectors plus dynamic slash commands, backed by kiro-cli.",
+  "license": "Apache-2.0",
+  "author": "Abdrahamane Sarambounou <abdrahaman.dev@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AbduRahmanS/kiro-acp-bridge.git"
+  },
+  "homepage": "https://github.com/AbduRahmanS/kiro-acp-bridge#readme",
+  "bugs": {
+    "url": "https://github.com/AbduRahmanS/kiro-acp-bridge/issues"
+  },
+  "keywords": [
+    "acp",
+    "agent-client-protocol",
+    "kiro",
+    "zed",
+    "ai-agent",
+    "bridge"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "kiro-acp-bridge": "./dist/index.js"
+  },
+  "main": "./dist/lib.js",
+  "types": "./dist/lib.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/lib.d.ts",
+      "default": "./dist/lib.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest --run",
+    "test:watch": "vitest",
+    "probe": "node scripts/handshake.mjs",
+    "verify:registry": "npm run build && node scripts/verify-registry.mjs",
+    "e2e": "npm run build && node scripts/e2e-spine.mjs && node scripts/e2e-config.mjs && node scripts/e2e-commands.mjs && node scripts/e2e-usage.mjs && node scripts/e2e-failures.mjs",
+    "prepublishOnly": "npm run build && npm run test"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "1.4.0",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "22.13.14",
+    "typescript": "5.7.3",
+    "vitest": "3.0.9"
+  }
+}

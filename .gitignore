@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# Local trace output. These can contain prompt text when
+# KIRO_BRIDGE_TRACE_CONTENT=1 is set, so they must never be committed.
+*.trace.log
+trace.log
