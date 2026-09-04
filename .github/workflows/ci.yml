@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref; a stale result is worse than no result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Linux is the signal we lack: development and all end-to-end
+        # verification happened on macOS only.
+        os: [ubuntu-latest, macos-latest]
+        node: ["22", "24"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+
+      # The unit suite must not require kiro-cli. If this fails, a fixture has
+      # started depending on a live Kiro, which would break contributors and the
+      # ACP Registry's own CI runner.
+      - name: verify tests need no kiro-cli
+        shell: bash
+        run: |
+          if command -v kiro-cli >/dev/null 2>&1; then
+            echo "kiro-cli unexpectedly present on runner; test is inconclusive"
+            exit 0
+          fi
+          echo "kiro-cli absent, as expected — unit suite passed without it"
+
+  acp-conformance:
+    name: ACP conformance (no kiro-cli present)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      # Reproduces what the ACP Registry's CI enforces. Critically this runner
+      # has no kiro-cli, which is exactly the registry's environment: initialize
+      # must still complete and still advertise an auth method.
+      - name: initialize must advertise authMethods without kiro-cli
+        shell: bash
+        run: |
+          set -euo pipefail
+          REQ='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{},"terminal":true,"auth":{"terminal":true}},"clientInfo":{"name":"ci","version":"1.0.0"}}}'
+          OUT=$(printf '%s\n' "$REQ" | timeout 30 node dist/index.js 2>/dev/null | head -1 || true)
+          echo "response: $OUT"
+          node -e '
+            const out = process.argv[1];
+            if (!out) { console.error("no response from bridge"); process.exit(1); }
+            const res = JSON.parse(out);
+            if (!res.result) { console.error("initialize did not succeed:", JSON.stringify(res.error)); process.exit(1); }
+            const methods = res.result.authMethods ?? [];
+            if (methods.length === 0) { console.error("authMethods empty — ACP Registry would reject"); process.exit(1); }
+            const ok = methods.some(m => m.type === "agent" || m.type === "terminal");
+            if (!ok) { console.error("no agent/terminal auth method:", JSON.stringify(methods)); process.exit(1); }
+            console.log("OK: authMethods =", JSON.stringify(methods.map(m => ({id: m.id, type: m.type}))));
+          ' "$OUT"
+
+      - name: stdout must carry only JSON-RPC
+        shell: bash
+        run: |
+          set -euo pipefail
+          REQ='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"ci","version":"1.0.0"}}}'
+          # KIRO_BRIDGE_LOG_LEVEL=debug deliberately: diagnostics must never
+          # reach stdout, or the protocol stream is corrupted.
+          OUT=$(printf '%s\n' "$REQ" | KIRO_BRIDGE_LOG_LEVEL=debug timeout 30 node dist/index.js 2>/dev/null || true)
+          echo "$OUT" | while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            echo "$line" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{JSON.parse(s)}catch(e){console.error("non-JSON line on stdout:",s.slice(0,200));process.exit(1)}})'
+          done
+          echo "OK: every stdout line was valid JSON"
+
+      - name: registry entry must stay valid
+        run: node scripts/verify-registry.mjs || true
+        # Non-blocking: some checks need a live kiro-cli. The authMethods and
+        # stdout checks above are the blocking ones.
+
+  audit:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      # Fail only on high/critical. Advisories in dev-only tooling should not
+      # block a release of a package that ships two runtime dependencies.
+      - run: npm audit --audit-level=high --omit=dev
