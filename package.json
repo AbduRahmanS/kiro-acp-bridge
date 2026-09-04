@@ -25,7 +25,7 @@
     "node": ">=22"
   },
   "bin": {
-    "kiro-acp-bridge": "./dist/index.js"
+    "kiro-acp-bridge": "dist/index.js"
   },
   "main": "./dist/lib.js",
   "types": "./dist/lib.d.ts",
