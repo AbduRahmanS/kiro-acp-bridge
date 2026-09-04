@@ -353,13 +353,7 @@ export class KiroBridge {
       // Translate a credentials problem into ACP's dedicated code, so the client
       // offers the auth methods from `initialize` instead of showing an opaque
       // internal error to a user who simply needs to sign in.
-      if (isAuthError(err)) {
-        this.diagnostics.warn("session/new failed: authentication required");
-        throw new RequestError(AUTH_REQUIRED_CODE, "Authentication required", {
-          details: authRequiredMessage(),
-        });
-      }
-      throw err;
+      this.rethrowKiroError(err, "session/new");
     }
     const session = this.sessions.create(kiroSession.sessionId, params.cwd);
 
@@ -650,7 +644,12 @@ export class KiroBridge {
   ): Promise<schema.ListSessionsResponse> {
     this.diagnostics.trace("zed->bridge", { method: "session/list", params });
     const kiro = await this.ensureKiro();
-    const listed = await kiro.sessionList();
+    let listed;
+    try {
+      listed = await kiro.sessionList();
+    } catch (err) {
+      this.rethrowKiroError(err, "session/list");
+    }
 
     const cwdFilter = params?.cwd;
     const sessions: schema.SessionInfo[] = [];
@@ -851,7 +850,7 @@ export class KiroBridge {
       if (err instanceof InvalidConfigValueError) {
         throw RequestError.invalidParams({ configId: params.configId, value }, err.message);
       }
-      throw err;
+      this.rethrowKiroError(err, "session/set_config_option");
     }
 
     const configOptions = buildConfigOptions(session);
@@ -915,6 +914,25 @@ export class KiroBridge {
       throw RequestError.invalidParams({ sessionId }, `Unknown session '${sessionId}'.`);
     }
     return session;
+  }
+
+  /**
+   * Rethrows a Kiro failure, translating credential problems into ACP's
+   * `-32000 authentication required`.
+   *
+   * Applied at every point Kiro can fail, not just session creation. Tokens
+   * commonly expire *during* a session (Kiro issue #10416), and without this a
+   * mid-turn expiry surfaces as an opaque internal error rather than prompting
+   * the user to sign in.
+   */
+  private rethrowKiroError(err: unknown, context: string): never {
+    if (isAuthError(err)) {
+      this.diagnostics.warn("kiro reported an authentication failure", { context });
+      throw new RequestError(AUTH_REQUIRED_CODE, "Authentication required", {
+        details: authRequiredMessage(),
+      });
+    }
+    throw err;
   }
 
   private async handleLoadSession(
@@ -988,7 +1006,12 @@ export class KiroBridge {
       }
     }
 
-    const response = await kiro.prompt(params);
+    let response: schema.PromptResponse;
+    try {
+      response = await kiro.prompt(params);
+    } catch (err) {
+      this.rethrowKiroError(err, "session/prompt");
+    }
     this.diagnostics.trace("bridge->zed", { method: "session/prompt:response", params: response });
 
     // Context grows with every turn, so refresh the usage figures afterwards.

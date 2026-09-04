@@ -47,7 +47,8 @@
     "test:watch": "vitest",
     "probe": "node scripts/handshake.mjs",
     "verify:registry": "npm run build && node scripts/verify-registry.mjs",
-    "e2e": "npm run build && node scripts/e2e-spine.mjs && node scripts/e2e-config.mjs && node scripts/e2e-commands.mjs && node scripts/e2e-usage.mjs && node scripts/e2e-failures.mjs",
+    "e2e": "npm run build && node scripts/e2e-spine.mjs && node scripts/e2e-config.mjs && node scripts/e2e-commands.mjs && node scripts/e2e-usage.mjs && node scripts/e2e-failures.mjs && node scripts/e2e-auth.mjs",
+    "e2e:auth": "npm run build && node scripts/e2e-auth.mjs",
     "prepublishOnly": "npm run build && npm run test"
   },
   "dependencies": {
