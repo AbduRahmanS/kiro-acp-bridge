@@ -1,0 +1,131 @@
+name: Release
+
+# Publishes to npm using npm Trusted Publishing (OIDC).
+#
+# No npm token is stored anywhere. GitHub Actions proves its identity to npm
+# directly, so there is no long-lived publish credential to leak — which is the
+# main risk of a bypass-2FA granular access token.
+#
+# ONE-TIME SETUP, required before this workflow can succeed:
+#   1. Publish 0.1.0 manually once (npm needs the package to exist).
+#   2. On npmjs.com go to the package -> Settings -> Trusted Publisher, and add:
+#        Provider:   GitHub Actions
+#        Repository: AbduRahmanS/kiro-acp-bridge
+#        Workflow:   release.yml
+#   3. Thereafter: bump the version, tag it, push the tag.
+#
+# Usage:
+#   npm version patch|minor|major     # updates package.json and creates a tag
+#   git push --follow-tags
+#
+# Or trigger manually from the Actions tab to re-attempt a failed publish.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Required for Trusted Publishing: lets the job mint an OIDC token that npm
+  # verifies. Without this, npm cannot confirm the workflow's identity.
+  id-token: write
+
+jobs:
+  publish:
+    name: publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+          cache: npm
+
+      # npm >= 11.5.1 is required for Trusted Publishing support.
+      - name: ensure npm supports trusted publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - run: npm ci
+
+      # Full gate before anything is published. A bad release is far more
+      # expensive than a failed one, because a version number cannot be reused.
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+
+      # Guard against the most common release mistake: tagging a version that
+      # does not match package.json, which would publish the wrong number.
+      - name: tag must match package.json version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(node -p "require('./package.json').version")
+          echo "tag=$TAG package.json=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag v$TAG does not match package.json version $PKG"
+            exit 1
+          fi
+
+      # The registry entry pins an exact version, so it must be bumped in the
+      # same commit as the release or the ACP Registry will fail validation.
+      - name: registry entry must match package.json version
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG=$(node -p "require('./package.json').version")
+          ENTRY=$(node -p "require('./registry/kiro-acp-bridge/agent.json').version")
+          DIST=$(node -p "require('./registry/kiro-acp-bridge/agent.json').distribution.npx.package")
+          echo "package.json=$PKG registry=$ENTRY distribution=$DIST"
+          if [ "$PKG" != "$ENTRY" ]; then
+            echo "::error::registry/kiro-acp-bridge/agent.json version ($ENTRY) != package.json ($PKG)"
+            exit 1
+          fi
+          if [ "$DIST" != "kiro-acp-bridge@$PKG" ]; then
+            echo "::error::registry distribution pin ($DIST) != kiro-acp-bridge@$PKG"
+            exit 1
+          fi
+
+      # Protocol invariants, re-checked on a runner with no kiro-cli — the same
+      # environment the ACP Registry validates in.
+      - name: ACP invariants hold without kiro-cli
+        shell: bash
+        run: |
+          set -euo pipefail
+          REQ='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{},"terminal":true,"auth":{"terminal":true}},"clientInfo":{"name":"release","version":"1.0.0"}}}'
+          OUT=$(printf '%s\n' "$REQ" | timeout 30 node dist/index.js 2>/dev/null | head -1 || true)
+          node -e '
+            const res = JSON.parse(process.argv[1] || "{}");
+            if (!res.result) { console.error("initialize failed"); process.exit(1); }
+            const m = res.result.authMethods ?? [];
+            if (!m.some(x => x.type === "agent" || x.type === "terminal")) {
+              console.error("no agent/terminal auth method — ACP Registry would reject");
+              process.exit(1);
+            }
+            console.log("OK authMethods:", JSON.stringify(m.map(x => x.id)));
+          ' "$OUT"
+
+      - name: publish
+        # No NODE_AUTH_TOKEN: authentication is via OIDC. npm also attaches a
+        # provenance attestation automatically, letting users verify the package
+        # was built from this repo at this commit.
+        run: npm publish --access public
+
+      - name: summarise
+        if: success()
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          {
+            echo "### Published \`kiro-acp-bridge@$VERSION\`"
+            echo
+            echo "- npm: https://www.npmjs.com/package/kiro-acp-bridge/v/$VERSION"
+            echo "- Built from \`${GITHUB_SHA}\` with provenance attestation."
+            echo
+            echo "The ACP Registry auto-detects new npm versions hourly; no PR needed for a version bump."
+          } >> "$GITHUB_STEP_SUMMARY"
