@@ -73,6 +73,24 @@ jobs:
             exit 1
           fi
 
+      # The version the bridge reports to clients must match the package it came
+      # from. This drifted once: BRIDGE_VERSION was a hardcoded constant and 0.1.1
+      # shipped announcing itself as 0.1.0. Because that value is sent as
+      # agentInfo.version and appears in ACP logs, the fault silently misdirects
+      # bug reports while nothing visibly breaks. It is now derived at runtime, and
+      # this asserts the derivation actually works in the built output.
+      - name: reported version must match package.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG=$(node -p "require('./package.json').version")
+          REPORTED=$(node dist/index.js --version 2>&1 | head -1 | tr -d '[:space:]')
+          echo "package.json=$PKG reported=$REPORTED"
+          if [ "$PKG" != "$REPORTED" ]; then
+            echo "::error::Bridge reports version $REPORTED but package.json says $PKG"
+            exit 1
+          fi
+
       # The registry entry pins an exact version, so it must be bumped in the
       # same commit as the release or the ACP Registry will fail validation.
       - name: registry entry must match package.json version

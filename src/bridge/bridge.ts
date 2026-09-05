@@ -16,6 +16,7 @@ import {
 } from "@agentclientprotocol/sdk";
 import type * as schema from "@agentclientprotocol/sdk";
 import { Readable, Writable } from "node:stream";
+import { createRequire } from "node:module";
 import type { Diagnostics } from "../diagnostics/logging.js";
 import { KiroConnection } from "../kiro/connection.js";
 import { KiroNotFoundError } from "../kiro/discovery.js";
@@ -1159,8 +1160,32 @@ export class KiroBridge {
   }
 }
 
-/** Kept in sync with package.json by the release process. */
-export const BRIDGE_VERSION = "0.1.0";
+/**
+ * The bridge's own version, read from `package.json` at runtime.
+ *
+ * Previously this was a hardcoded constant with a comment claiming the release
+ * process kept it in sync. No such step existed, and 0.1.1 duly shipped reporting
+ * itself as 0.1.0. Since this value reaches the client as `agentInfo.version` and
+ * appears in ACP logs, a stale number makes bug reports actively misleading — so
+ * it is now derived rather than maintained.
+ *
+ * `dist/bridge/bridge.js` sits two levels below the package root, which holds for
+ * both the published layout and a local build. A hardcoded fallback keeps the
+ * bridge working if that ever stops being true, rather than failing to start over
+ * a cosmetic value.
+ */
+function readVersion(): string {
+  try {
+    const require = createRequire(import.meta.url);
+    const pkg = require("../../package.json") as { version?: unknown };
+    if (typeof pkg.version === "string" && pkg.version.length > 0) return pkg.version;
+  } catch {
+    /* fall through */
+  }
+  return "0.0.0-unknown";
+}
+
+export const BRIDGE_VERSION = readVersion();
 
 /**
  * ACP's "authentication required" error code.
