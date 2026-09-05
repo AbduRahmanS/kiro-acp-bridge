@@ -1,6 +1,6 @@
 {
   "name": "kiro-acp-bridge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Standards-compliant ACP bridge that gives Zed the full Kiro experience: native model, reasoning-effort and agent selectors plus dynamic slash commands, backed by kiro-cli.",
   "license": "Apache-2.0",
   "author": "Abdrahamane Sarambounou <abdrahaman.dev@gmail.com>",
