@@ -6,7 +6,7 @@
  * working account, so a fixture returning Kiro's genuine error strings stands in.
  *
  * Asserts:
- *   1. terminal auth is advertised even though Kiro reports authMethods: []
+ *   1. terminal auth is advertised when Kiro reports none (its signed-in state)
  *   2. an expired token at session/new becomes ACP -32000, not an opaque -32603
  *   3. the same for an invalid grant, and for a failure mid-prompt
  *   4. the guidance names the exact command to run

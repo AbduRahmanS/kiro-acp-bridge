@@ -1,29 +1,31 @@
 /**
  * Authentication.
  *
- * Kiro returns `authMethods: []` from `initialize` — it assumes an
- * already-authenticated CLI and offers no in-protocol way to sign in. That has
- * two consequences:
+ * Kiro's ACP auth surface is **state-dependent**, which is easy to misread.
+ * Measured against kiro-cli 2.21.0 with an authenticated CLI, `initialize`
+ * returns `authMethods: []`. But the shipped binary contains a `kiro-login`
+ * method ("Kiro Login", "Run `… login` in terminal to authenticate") which it
+ * advertises when authentication is actually required — so an empty list means
+ * "nothing needed right now", not "no method exists".
  *
- *  1. A client cannot help a user who is signed out. Zed advertises
- *     `auth.terminal: true` and would happily run a setup flow, but there is
- *     nothing to run.
- *  2. The ACP Registry refuses to list agents that return no auth method, so
- *     Kiro cannot be published as-is.
+ * Two real gaps remain, and the bridge closes both:
  *
- * ACP's **Terminal Auth** (stabilised in schema 1.21.0) fits Kiro exactly:
- * the client re-runs the agent binary with replacement arguments, the agent
- * presents an interactive terminal UI, and exit code 0 means success. Kiro's
- * `kiro-cli login` is precisely that — a browser/device OAuth flow driven from a
- * terminal.
+ *  1. **The state is not knowable before the handshake.** A client decides what
+ *     to render from a single `initialize` response. Advertising a terminal method
+ *     unconditionally means a sign-in affordance always exists — including for a
+ *     token that expires mid-session.
+ *  2. **`kiro-cli` may be absent entirely.** The bridge ships via npx and does not
+ *     bundle Kiro, so on a fresh machine — or the ACP Registry's CI runner — there
+ *     is no Kiro process to advertise anything at all.
  *
- * So the bridge advertises a terminal auth method and implements it by handing
- * control to `kiro-cli login`. This is not a workaround to satisfy a registry
- * check: it is the honest description of how Kiro authentication actually works,
- * and it makes signing in reachable from inside Zed.
+ * ACP's **Terminal Auth** (stabilised in schema 1.21.0) models this exactly: the
+ * client re-runs the agent binary with replacement arguments, the agent presents an
+ * interactive terminal UI, and exit code 0 means success. `kiro-cli login` is
+ * precisely that — a browser/device OAuth flow driven from a terminal. This is a
+ * faithful translation of Kiro's own mechanism, not an invention.
  *
- * The bridge still never touches credentials. `kiro-cli` performs the flow and
- * owns the resulting tokens.
+ * The bridge never touches credentials. `kiro-cli` performs the flow and owns the
+ * resulting tokens.
  */
 
 import type * as schema from "@agentclientprotocol/sdk";

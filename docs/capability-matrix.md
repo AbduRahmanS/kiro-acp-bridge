@@ -86,8 +86,8 @@ Legend: ✅ works · ⚠️ works with a caveat · ❌ unavailable · — not ap
 | Feature | Kiro direct ACP | Via bridge | Zed UX |
 |---|---|---|---|
 | Uses existing signed-in CLI | ✅ | ✅ no credentials touched | — |
-| `authMethods` advertised | ❌ `[]` | ✅ terminal method | native sign-in |
-| In-editor sign-in | ❌ impossible | ✅ runs `kiro-cli login` | native |
+| `authMethods` advertised | ⚠️ only when auth is required; `[]` when signed in | ✅ always, so state need not be guessed | native sign-in |
+| In-editor sign-in | ⚠️ only in the signed-out state | ✅ available in any state | native |
 | Auth failure signalled as `-32000` | ❌ opaque internal error | ✅ | native prompt |
 | `initialize` survives missing Kiro | ❌ | ✅ degraded, still advertises auth | agent connects |
 
@@ -113,7 +113,7 @@ Legend: ✅ works · ⚠️ works with a caveat · ❌ unavailable · — not ap
 | **`session/resume`** | Kiro does not advertise the capability and `session/load` already covers reopening. |
 | **Compaction / clear status** | `_kiro.dev/compaction/status` and `_kiro.dev/clear/status` are recognised and logged, but ACP's compaction updates are unstable-only, so there is no stable surface to map them to. |
 | **v3 agent engine** | Broken for ACP: `session/new` fails and all `_kiro.dev/*` methods return a `PersistenceClassification` internal error. Pinned to v2. |
-| **ACP Registry publication** | Unblocked. The Registry requires at least one `agent` or `terminal` auth method; Kiro returns `authMethods: []`, so the bridge adds an ACP Terminal Auth method that runs `kiro-cli login`. See [publishing.md](publishing.md). Remaining steps are npm publish and the PR. |
+| **ACP Registry publication** | Unblocked. The Registry requires at least one `agent` or `terminal` auth method; Kiro advertises `kiro-login` only when auth is required and `[]` when signed in, and may be absent entirely; the bridge normalises this with an ACP Terminal Auth method backed by `kiro-cli login`. See [publishing.md](publishing.md). Remaining steps are npm publish and the PR. |
 
 ## Gaps by owner
 

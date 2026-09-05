@@ -64,8 +64,13 @@ python3 .github/workflows/verify_agents.py --auth-check
 and requires `initialize` to return `authMethods` containing at least one method of
 `type: "agent"` or `type: "terminal"`.
 
-**Kiro returns `authMethods: []`.** It assumes an already-authenticated CLI and offers
-no in-protocol sign-in. Passing that through would fail validation.
+**Kiro's auth surface is state-dependent.** With a signed-in CLI, `initialize`
+returns `authMethods: []`; the binary does contain a `kiro-login` method that it
+advertises when authentication is required. So the bridge is not filling a total
+void — but two gaps are real: a client must decide what to render from one
+response without knowing the auth state, and `kiro-cli` may be absent entirely,
+which is exactly the ACP Registry runner's condition since the bridge ships via
+npx and does not bundle Kiro.
 
 The fix is ACP **Terminal Auth**, and it is not a workaround — it is an accurate
 description of how Kiro authentication actually works. `kiro-cli login` is an

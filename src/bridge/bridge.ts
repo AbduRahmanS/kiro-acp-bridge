@@ -289,8 +289,11 @@ export class KiroBridge {
           list: {},
         },
       },
-      // Kiro reports no auth methods at all, which leaves a signed-out user with
-      // no way in. The bridge adds a terminal method that runs `kiro-cli login`.
+      // Kiro advertises its own `kiro-login` method only when authentication is
+      // actually required; with a signed-in CLI it returns an empty list. Since
+      // the client must decide what to render from one response — and since
+      // kiro-cli may be absent entirely — the bridge always offers a terminal
+      // method so a sign-in path exists in every state.
       authMethods: buildAuthMethods(kiroInit.authMethods, params.clientCapabilities),
       agentInfo: {
         name: "Kiro",

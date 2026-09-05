@@ -125,7 +125,7 @@ A static matrix would have been wrong in both directions.
 | **`session/resume`** | Kiro does not advertise the capability; `session/load` covers reopening. |
 | **Compaction / clear status** | Recognised and logged, but ACP's compaction updates are unstable-only, so there is no stable target. |
 | **v3 agent engine** | Its ACP surface is broken — `session/new` fails and every `_kiro.dev/*` method returns a `PersistenceClassification` internal error. Pinned to v2. |
-| **ACP Registry publication** | **Now unblocked.** The Registry requires an `agent` or `terminal` auth method and Kiro returns `authMethods: []`; the bridge adds ACP Terminal Auth backed by `kiro-cli login`. Remaining work is npm publish plus the PR — see [publishing.md](publishing.md). |
+| **ACP Registry publication** | **Now unblocked.** The Registry requires an `agent` or `terminal` auth method; Kiro returns `[]` when signed in and may be absent entirely on a CI runner; the bridge adds ACP Terminal Auth backed by `kiro-cli login`. Remaining work is npm publish plus the PR — see [publishing.md](publishing.md). |
 | **Terminal-only commands** | 11 excluded (`/quit`, `/paste`, `/voice`, `/reply`, `/editor`, `/theme`, `/copy`, `/transcript`, `/clear`…). Zed does each better natively. Functional parity, not TUI emulation. |
 
 ---
@@ -264,7 +264,7 @@ full ACP handshake against a live `kiro-cli`.
 **ACP Registry PR:** [agentclientprotocol/registry#575](https://github.com/agentclientprotocol/registry/pull/575).
 Their `build_registry.py` accepts the entry locally (`Added agent: kiro-acp-bridge
 v0.1.0`). Listing was initially blocked because the Registry requires at least one
-`agent` or `terminal` auth method and Kiro returns `authMethods: []`; resolved by
+`agent` or `terminal` auth method and Kiro returns `authMethods: []` when signed in; resolved by
 advertising ACP **Terminal Auth** backed by `kiro-cli login`, which is not a
 workaround but an accurate description of how Kiro authentication works — and it
 makes signing in reachable from inside an editor for the first time.

@@ -67,8 +67,8 @@ function handle(msg) {
 
   switch (method) {
     case "initialize":
-      // Exactly what kiro-cli 2.21.0 returns, including the empty authMethods
-      // that makes the bridge's terminal-auth addition necessary.
+      // Exactly what kiro-cli 2.21.0 returns when ALREADY AUTHENTICATED. Kiro does
+      // advertise kiro-login when auth IS required; [] means "nothing needed now".
       return ok(id, {
         protocolVersion: 1,
         agentCapabilities: {

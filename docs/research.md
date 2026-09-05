@@ -88,9 +88,12 @@ Two things matter here:
 - **`sessionCapabilities: {}`** — Kiro advertises no session list/delete/resume/close,
   even though `_kiro.dev/session/list` works perfectly. The capability declaration
   understates the implementation.
-- **`authMethods: []`** — Kiro relies on an already-authenticated CLI. This blocks
-  ACP Registry publication, which requires every listed agent to return valid
-  `authMethods`.
+- **`authMethods: []`** — measured with an **authenticated** CLI. This is
+  state-dependent: the shipped binary contains a `kiro-login` method ("Kiro Login",
+  "Run `… login` in terminal to authenticate") which it advertises when
+  authentication is required. So the empty list means "nothing needed right now",
+  not "no method exists". A single-state observation is not enough here — this
+  document originally drew the stronger, wrong conclusion.
 
 ### Standard methods Kiro implements
 
