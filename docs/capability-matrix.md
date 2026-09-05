@@ -117,8 +117,12 @@ Legend: ✅ works · ⚠️ works with a caveat · ❌ unavailable · — not ap
 
 ## Gaps by owner
 
+All of these are now filed upstream — see [upstream.md](upstream.md) for the issue
+links and what each fix would let this bridge delete.
+
 **Zed should fix:** read `AvailableCommand.input.hint` and show it (it is already
-sent); log unknown `session/update` variants instead of dropping them silently.
+sent) — [zed#63796](https://github.com/zed-industries/zed/issues/63796); log unknown
+`session/update` variants instead of dropping them silently.
 
 **Kiro should fix:** implement `session/set_config_option` so this bridge can retire
 its main adapter; emit a notification when model/agent/effort changes (the absence of
