@@ -257,17 +257,21 @@ If Kiro is not on Zed's PATH — common, since Zed uses a minimal environment �
 Requires Node ≥ 22 and an authenticated Kiro CLI. Full guide:
 [zed-setup.md](zed-setup.md).
 
-**Not yet published to npm.** The package is complete but should have a Linux run and
-manual MCP OAuth verification first.
+**Published.** `kiro-acp-bridge@0.1.0` is live on npm and verified by installing it
+from the registry into a clean directory and driving the installed binary through a
+full ACP handshake against a live `kiro-cli`.
 
-**ACP Registry listing is now possible.** It was initially blocked: the Registry
-requires at least one `agent` or `terminal` auth method and Kiro returns
-`authMethods: []`. Resolved by advertising ACP **Terminal Auth** backed by
-`kiro-cli login` — which is not a workaround but an accurate description of how Kiro
-authentication works, and it makes signing in reachable from inside Zed for the first
-time. `npm run verify:registry` reproduces the Registry's CI checks locally, including
-the case where `kiro-cli` is absent (as it will be on their runner). Steps in
-[publishing.md](publishing.md).
+**ACP Registry PR:** [agentclientprotocol/registry#575](https://github.com/agentclientprotocol/registry/pull/575).
+Their `build_registry.py` accepts the entry locally (`Added agent: kiro-acp-bridge
+v0.1.0`). Listing was initially blocked because the Registry requires at least one
+`agent` or `terminal` auth method and Kiro returns `authMethods: []`; resolved by
+advertising ACP **Terminal Auth** backed by `kiro-cli login`, which is not a
+workaround but an accurate description of how Kiro authentication works — and it
+makes signing in reachable from inside an editor for the first time.
+
+`npm run verify:registry` reproduces the Registry's checks locally, including the
+case where `kiro-cli` is absent, as it will be on their runner. Steps and the
+non-obvious npm 2FA constraints are documented in [publishing.md](publishing.md).
 
 ---
 

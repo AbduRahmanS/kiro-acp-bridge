@@ -1,5 +1,9 @@
 # Kiro ACP Bridge
 
+[![npm](https://img.shields.io/npm/v/kiro-acp-bridge)](https://www.npmjs.com/package/kiro-acp-bridge)
+[![CI](https://github.com/AbduRahmanS/kiro-acp-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/AbduRahmanS/kiro-acp-bridge/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/kiro-acp-bridge)](LICENSE)
+
 Native Kiro selectors and slash commands inside Zed's Agent Panel.
 
 ```
@@ -61,6 +65,9 @@ The bridge holds no credentials. It uses your existing authenticated Kiro CLI.
 ```bash
 npm install -g kiro-acp-bridge
 ```
+
+Or without installing anything globally, let Zed fetch it on demand — see
+[docs/zed-setup.md](docs/zed-setup.md).
 
 Then in Zed's `settings.json`:
 

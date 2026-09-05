@@ -8,10 +8,48 @@ becomes:
 { "agent_servers": { "Kiro": { "type": "registry" } } }
 ```
 
-Registry: <https://github.com/agentclientprotocol/registry> ·
-Index: <https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json>
+**Published.** `kiro-acp-bridge@0.1.0` is live on npm:
+<https://www.npmjs.com/package/kiro-acp-bridge>
 
-There is currently **no Kiro entry** in the registry (39 agents listed, none Kiro).
+**ACP Registry PR submitted:**
+<https://github.com/agentclientprotocol/registry/pull/575>
+
+Verified after publishing by installing the package from the registry into a clean
+directory and driving the installed binary through a full ACP handshake against a
+live `kiro-cli` — protocol v1 negotiated, terminal auth advertised, all three
+selectors delivered, model switching applied, and the effort list correctly
+refreshed to include `none` for a GPT model. That is a materially different test
+from anything run against the dev tree: it exercises the artifact users actually
+receive, so it catches packaging faults such as a file missing from the `files`
+allowlist or a broken `bin` shebang.
+
+## How 0.1.0 was actually published
+
+Recorded because the path was not obvious and will be needed again if trusted
+publishing is ever unavailable.
+
+npm requires 2FA to publish. The account had 2FA disabled, and enabling it turned
+out to be a dead end for CLI publishing: **npm has disabled new TOTP enrolments**,
+so 2FA is now passkey/WebAuthn only — and the npm CLI cannot satisfy a passkey
+challenge for `publish`, because its 2FA path is `--otp=` and there is no code to
+supply. Upgrading npm from 10.9.8 to 12.0.2 made no difference; the limitation is
+in the flow, not the version.
+
+The documented answer for this configuration is a **granular access token with
+"Bypass 2FA" enabled**. Two non-obvious constraints:
+
+- The token must be scoped to **All packages**, not "Only select packages". A new
+  package cannot be selected because it does not exist yet, and a narrowly-scoped
+  token yields `E404` on publish — npm masks the permission failure as "not found"
+  so it does not leak which packages exist.
+- Verify the token before publishing with
+  `npm whoami --userconfig <file>`. A wrong or truncated paste also produces
+  `E404`, which is indistinguishable from the scope problem by symptom alone.
+
+The token was passed via `--userconfig` pointing at a temporary file rather than a
+CLI flag, so it never entered shell history or `ps` output, and was deleted
+immediately afterwards. **Revoke it once trusted publishing is configured** — it
+carries write access to every package on the account.
 
 ---
 
