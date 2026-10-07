@@ -150,20 +150,42 @@ pid.
 
 ## Isolating from your real Kiro data
 
-Useful when testing, so nothing lands in `~/.kiro`:
+`KIRO_DATA_DIR` and `KIRO_HOME` are **not** enough: v2 keeps writing sessions to
+`~/.kiro/sessions/cli`, and the V3 engine ignores `KIRO_HOME` (it wrote sessions, logs and a
+session index to the real `~/.kiro` in testing). Replacing `HOME` alone signs Kiro out.
+
+What works (verified on kiro-cli 2.28, both engines): a fake `HOME` with an empty `.kiro`
+and two symlinks back to the real install — the data directory (holds the sign-in) and
+`~/.local/bin` (Kiro launches `$HOME/.local/bin/kiro-cli-chat`). `scripts/lib/sandbox.mjs`
+builds this at `/tmp/kiro-bridge-sandbox`, and every live e2e script uses it:
 
 ```bash
-KIRO_DATA_DIR=/tmp/kiro-probe/datadir \
-KIRO_DISABLE_TELEMETRY=1 \
-KIRO_DISABLE_SESSION_SEARCH_INDEX=1 \
-kiro-acp-bridge
+H=/tmp/kiro-bridge-sandbox/home
+mkdir -p "$H/.kiro" "$H/Library/Application Support" "$H/.local"
+ln -s ~/"Library/Application Support/kiro-cli" "$H/Library/Application Support/kiro-cli"   # Linux: ~/.local/share/kiro-cli
+ln -s ~/.local/bin "$H/.local/bin"
+HOME=$H KIRO_CLI_PATH=~/.local/bin/kiro-cli KIRO_DISABLE_TELEMETRY=1 kiro-acp-bridge
 ```
 
-Authentication still works, because credentials live outside the data directory.
+`scripts/e2e-engines.mjs` fails if anything mentioning the sandbox appears in the real
+`~/.kiro` afterwards.
 
 Note that writing to `~/.kiro/settings/mcp.json` or `~/.kiro/agents/` triggers Kiro's
 file watcher, which reconciles and restarts MCP servers **inside running sessions** at
 the next idle boundary. Avoid editing those while sessions are live.
+
+## A model is missing from the picker
+
+1. Run `/restart-kiro` in the thread. Kiro reads its model list once per process; the
+   restart notice lists the models it now offers.
+2. Compare with `kiro-cli chat --list-models`. The list is decided server-side by plan and
+   region, so a model announced for `us-east-1`/`eu-central-1` or a specific plan may not
+   be offered to you. If the CLI does not list it, the bridge cannot show it.
+
+## Kiro crashed or was restarted
+
+The bridge starts a new Kiro on the next request and re-attaches the thread with
+`session/load`; earlier messages are not replayed into Zed a second time.
 
 ## Reproducing outside Zed
 
@@ -177,6 +199,7 @@ node scripts/e2e-config.mjs     # selectors
 node scripts/e2e-commands.mjs   # slash commands, skills, state sync
 node scripts/e2e-usage.mjs      # usage, credits, session list
 node scripts/e2e-failures.mjs   # failure paths, redaction, crash, images
+node scripts/e2e-engines.mjs    # v2 + CLI V3: selectors, validation, /restart-kiro, leak check
 ```
 
 Each prints PASS/FAIL per assertion and exits non-zero on failure.

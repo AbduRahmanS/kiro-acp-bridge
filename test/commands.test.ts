@@ -6,6 +6,7 @@ import {
   EXCLUDED_COMMANDS,
   parseSlashCommand,
   planCommand,
+  RESTART_COMMAND,
   STATE_CHANGING_COMMANDS,
 } from "../src/bridge/commands.js";
 import type { KiroCommand } from "../src/kiro/protocol.js";
@@ -173,8 +174,15 @@ describe("buildAvailableCommands", () => {
     expect(new Set(dup.map((c) => c.name)).size).toBe(dup.length);
   });
 
-  it("tolerates an empty catalogue", () => {
-    expect(buildAvailableCommands([])).toEqual([]);
+  it("tolerates an empty catalogue, still offering the bridge's own commands", () => {
+    expect(buildAvailableCommands([]).map((c) => c.name)).toEqual([RESTART_COMMAND]);
+  });
+
+  it("lists /restart-kiro first and never lets Kiro shadow it", () => {
+    const built = buildAvailableCommands([{ name: `/${RESTART_COMMAND}`, description: "kiro's own" }]);
+    expect(built[0]?.name).toBe(RESTART_COMMAND);
+    expect(built.filter((c) => c.name === RESTART_COMMAND)).toHaveLength(1);
+    expect(built[0]?.description).not.toBe("kiro's own");
   });
 });
 
@@ -216,7 +224,8 @@ describe("buildAvailableCommands — skills", () => {
 
   it("gives skills an input hint so arguments are expected", () => {
     const built = buildAvailableCommands([], skills);
-    expect((built[0]?.input as { hint: string }).hint).toContain("context");
+    const skill = built.find((c) => c.name === skills[0]!.name);
+    expect((skill?.input as { hint: string }).hint).toContain("context");
   });
 });
 

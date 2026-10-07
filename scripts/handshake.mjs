@@ -6,12 +6,14 @@
  *
  * Runs against ./dist, so `npm run build` first.
  *
- * Isolation: uses KIRO_DATA_DIR so it never writes into ~/.kiro.
+ * Isolation: runs Kiro under the sandbox HOME (scripts/lib/sandbox.mjs), so it
+ * never writes into the real ~/.kiro.
  */
 import { execSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { Diagnostics } from "../dist/diagnostics/logging.js";
 import { KiroConnection } from "../dist/kiro/connection.js";
+import { sandboxEnv } from "./lib/sandbox.mjs";
 
 const PROBE_DIR = "/tmp/kiro-bridge-handshake";
 mkdirSync(`${PROBE_DIR}/datadir`, { recursive: true });
@@ -40,9 +42,7 @@ const conn = await KiroConnection.spawn({
   cwd: process.cwd(),
   env: {
     ...process.env,
-    KIRO_DATA_DIR: `${PROBE_DIR}/datadir`,
-    KIRO_DISABLE_TELEMETRY: "1",
-    KIRO_DISABLE_SESSION_SEARCH_INDEX: "1",
+    ...sandboxEnv(),
   },
 });
 

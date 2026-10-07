@@ -99,18 +99,41 @@ All configuration is via `env` in the Zed agent block.
 | Variable | Default | Purpose |
 |---|---|---|
 | `KIRO_CLI_PATH` | auto-discovered | Absolute path to `kiro-cli` |
-| `KIRO_BRIDGE_AGENT_ENGINE` | `v2` | Kiro agent engine. **Leave this alone** — v3's ACP surface is broken |
+| `KIRO_BRIDGE_AGENT_ENGINE` | `v2` | `v2`, `v3` (CLI V3, kiro-cli 2.28+), or `auto` (V3, falling back to v2). See [compatibility](compatibility.md#kiro-engine-versions) for what each engine offers |
 | `KIRO_BRIDGE_LOG_LEVEL` | `warn` | `error` \| `warn` \| `info` \| `debug` \| `trace` |
+| `KIRO_BRIDGE_MODEL_CHECK_MINUTES` | `10` | Minimum minutes between background checks for new models; `0` disables |
 | `KIRO_BRIDGE_TRACE` | off | `1` to log sanitised JSON-RPC frames |
 | `KIRO_BRIDGE_TRACE_CONTENT` | off | `1` to include prompt text in traces. **Writes your prompts to disk** |
 | `KIRO_BRIDGE_TRACE_FILE` | — | Also append traces to this file |
 
-Kiro's own variables still work, and are useful for isolation while testing:
+Kiro's own variables still work:
 
 | Variable | Purpose |
 |---|---|
-| `KIRO_DATA_DIR` | Redirect Kiro's data dir away from `~/.kiro` |
 | `KIRO_DISABLE_TELEMETRY` | Disable Kiro telemetry |
+
+`KIRO_DATA_DIR` and `KIRO_HOME` do **not** isolate Kiro's session storage (and the V3
+engine ignores `KIRO_HOME`); see [debugging](debugging.md#isolating-from-your-real-kiro-data).
+
+## New models
+
+You normally don't need to do anything. Kiro loads its model list once per process, so
+the bridge checks the account's list in the background (at most every 10 minutes, after
+a turn finishes) with the read-only `kiro-cli chat --list-models`. When it changes:
+
+- **New threads** get the new list automatically: the bridge reloads Kiro just before
+  creating the thread, when nothing is running, and says which models were added.
+- **Open threads** show a one-time note on their next message. Type `/restart-kiro` there
+  to load the models into that thread's picker; the conversation continues.
+
+`/restart-kiro` also works on its own, and reports what changed. If a model still does not
+appear, it is not offered to your account or region (`kiro-cli chat --list-models` shows
+what is). Set `KIRO_BRIDGE_MODEL_CHECK_MINUTES` to change the interval, or `0` to turn
+the check off.
+
+On the CLI V3 engine, new threads start with Kiro's **Autopilot** off (tools ask for
+approval, as on v2). To run without confirmations, add `"autopilot": "on"` to
+`default_config_options`.
 
 ## Zed defaults for the selectors
 

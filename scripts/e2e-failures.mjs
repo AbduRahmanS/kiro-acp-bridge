@@ -15,6 +15,7 @@ import { execSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { promisify } from "node:util";
 import { ZedSim, pidAlive } from "./lib/zed-sim.mjs";
+import { sandboxEnv } from "./lib/sandbox.mjs";
 
 const execFileAsync = promisify(execFile);
 const PROBE = "/tmp/kiro-bridge-fail";
@@ -28,11 +29,7 @@ const check = (name, ok, detail = "") => {
   console.log(`${ok ? "  PASS" : "  FAIL"}  ${name}${detail ? ` — ${detail}` : ""}`);
   if (!ok) failures++;
 };
-const baseEnv = {
-  KIRO_DATA_DIR: `${PROBE}/datadir`,
-  KIRO_DISABLE_TELEMETRY: "1",
-  KIRO_DISABLE_SESSION_SEARCH_INDEX: "1",
-};
+const baseEnv = sandboxEnv();
 
 // ---------------------------------------------------------------------------
 console.log("=== 1. Kiro not installed ===");

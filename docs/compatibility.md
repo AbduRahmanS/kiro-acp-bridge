@@ -4,9 +4,9 @@
 
 | Component | Version | Notes |
 |---|---|---|
-| Kiro CLI | 2.21.0 | agent engine **v2** (pinned) |
+| Kiro CLI | 2.28.0 | engine **v2** (default) and **CLI V3** (`KIRO_BRIDGE_AGENT_ENGINE=v3` or `auto`) |
 | ACP protocol | 1 | stable schema line |
-| ACP TS SDK | 1.4.0 | pinned exactly |
+| ACP TS SDK | 1.7.0 | pinned exactly |
 | Node.js | 22.22.3 | `>= 22` required |
 | Zed | `main` @ `28e52a2` | source-inspected |
 | Platform | macOS arm64 | Linux paths implemented, untested; Windows paths implemented, untested |
@@ -59,7 +59,8 @@ delete code, not add it.
 | fixes relative `locations[].path` | Simplify `paths.ts` case 1. |
 | fixes the diff base directory | Simplify `paths.ts` case 2. |
 | returns non-empty `authMethods` | ACP Registry publication becomes possible. |
-| makes the v3 engine's ACP surface work | Consider unpinning `--agent-engine v2`. |
+| makes the v3 engine's ACP surface work | **Met on 2.28** (V3 adapter added, opt-in). Make V3 the default once it reports token counts. |
+| V3 becomes the only engine | Delete `config.ts`'s v2 translation, `skills.ts`, the `_kiro.dev/*` dialect in `protocol.ts`. |
 
 Correspondingly, if **Zed** starts reading `AvailableCommand.input.hint`, subcommand
 hints become visible with no bridge change — the hints are already sent.
@@ -83,21 +84,58 @@ the design intent, and the failure paths are exercised in `e2e-failures.mjs`.
 
 ## Kiro engine versions
 
-**v2 is required.** The v3 engine's ACP surface is unusable on 2.21.0: `session/new`
-returns no session id, and every `_kiro.dev/*` method fails with
+The bridge has two southbound adapters, chosen per connection from what Kiro's
+`initialize` advertises (`agentCapabilities._meta.kiro.extensionMethods` marks CLI V3;
+both generations negotiate ACP protocol 1, so the protocol version cannot tell them apart).
 
-```
-[PersistenceClassification] Ext method "…" has no persistence classification.
-```
+| `KIRO_BRIDGE_AGENT_ENGINE` | Behaviour |
+|---|---|
+| unset / `v2` | v2 engine (default) |
+| `v3` | CLI V3 engine, launched with `--auth-method=cli` |
+| `auto` | V3 first; v2 if V3 cannot start (older kiro-cli). A signed-out V3 is **not** a fallback reason — it surfaces as "authentication required". |
 
-v3 also relocates extensions to a `_kiro/*` namespace with different method names
-(`_kiro/account/getUsage`, `_kiro/session/context`, `_kiro/workflow/*`). Supporting it
-will mean a second southbound dialect, once it works. Tracked upstream as
-[#10761](https://github.com/kirodotdev/Kiro/issues/10761) and
-[#10877](https://github.com/kirodotdev/Kiro/issues/10877).
+The first engine that starts is locked in for the bridge's lifetime, so a restart never
+changes the dialect under existing threads.
 
-`KIRO_BRIDGE_AGENT_ENGINE` can override the pin for experimentation. It is not
-supported.
+**Why v2 stays the default.** V3 works on 2.28, but moving users silently would lose:
+absolute token counts (V3 reports a percentage only, so Zed's context ring has no data),
+and v2 commands with no V3 route (`/tools`, `/hooks`, `/rewind`, `/knowledge`, `/chat`,
+`/prompts`). V3 is also still early access. Flip the default when V3 reports a context
+window or token counts.
+
+### What the V3 adapter does
+
+Zed sees the same option ids (`agent`, `model`, `effort`) and command names on both engines.
+
+| Concern | V3 behaviour (measured on 2.28) | Bridge handling |
+|---|---|---|
+| Config options | native `configOptions` + `session/set_config_option` | passed through; `mode`/`effortLevel` renamed to `agent`/`effort` by category; other options (`autopilot`, `memoryReflection`, …) passed through |
+| Unknown model | **accepted**, session then has no usable model | rejected with `-32602` before reaching Kiro |
+| Unknown effort | silently ignored | rejected with `-32602` |
+| `autopilot` | defaults to `on` (no tool confirmations) | set to `off` on new sessions; override with Zed's `default_config_options` |
+| Effort across model switch | reset to the new model's default | a user-chosen level is re-applied when supported |
+| `session/load` with history | response omits the model option; it follows ~75 ms later as `config_option_update` | adopted in order; a stale response never overwrites a newer notification |
+| Slash commands | `_kiro.dev/commands/*` removed; only steering/subagents advertised | `/model /agent /effort /plan /context /compact /usage /mcp /help` routed per Kiro's migration guide |
+| Context usage | `session_info_update` `context_usage` (percentage; bucket token counts are stale) | shown in `/context` and `/usage` as percentages; no `usage_update` |
+| MCP | full `_kiro/mcp/status` snapshots | each failure reported once; OAuth URLs offered via URL elicitation |
+| `_kiro/openExternalUrl` | requested only if the client opts in | opted in; turned into a URL elicitation |
+| Auth methods | `aws-builder-id`, `aws-iam-identity-center` | not forwarded: with CLI-owned auth a signed-out V3 exits before it can answer `authenticate`; the terminal `kiro-cli login` method is offered instead |
+
+`v2` limitations kept: no `session/delete` (not advertised); `session/close` only frees bridge state.
+
+## New models
+
+Kiro's model roster is server-side (it changed from 6 to 21 to 3 models during one
+afternoon of testing) and loaded once per Kiro process. Zed keeps one agent process for
+all threads, so a newly released model stays hidden until Kiro restarts. The bridge
+compares the running Kiro's list with `kiro-cli chat --list-models` (read-only, ~4–7 s,
+creates no files; a failed check is ignored) at most every
+`KIRO_BRIDGE_MODEL_CHECK_MINUTES` (default 10), triggered after a turn. On a change it
+reloads Kiro before the next `session/new` if no turn is running, and posts a one-time
+note in open threads. `/restart-kiro`
+restarts only the Kiro child and re-attaches the thread (`session/load`, transcript replay
+suppressed), so the picker updates without restarting Zed. It refuses while another
+thread has a turn running.
 
 ## ACP protocol versions
 
@@ -106,7 +144,7 @@ Targeting **v1 stable** deliberately. Protocol v2 is at `2.0.0-alpha.3`; it remo
 and drops the `tool_call` and `current_mode_update` session-update variants. Current Zed
 negotiates v1, so building against v2 would produce a bridge Zed cannot talk to.
 
-The SDK is pinned exactly (`1.4.0`) rather than with a caret range, because ACP is
+The SDK is pinned exactly (`1.7.0`) rather than with a caret range, because ACP is
 evolving quickly and a silent minor bump could change wire behaviour. Upgrades should be
 deliberate: bump, run the unit suite, then run all five end-to-end scripts.
 

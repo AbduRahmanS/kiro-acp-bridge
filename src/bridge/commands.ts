@@ -77,6 +77,26 @@ export const STATE_CHANGING_COMMANDS: Record<string, { variant: string; argKey?:
   guide: { variant: "guide" },
 };
 
+/** Name of the bridge's own restart command. Handled before any engine sees it. */
+export const RESTART_COMMAND = "restart-kiro";
+
+/**
+ * Commands the bridge implements itself, on every engine.
+ *
+ * `/restart-kiro` exists because Kiro loads its model roster once per process:
+ * a model released while Zed is running stays invisible until Kiro restarts, and
+ * Zed keeps one agent process for all threads. Restarting Kiro alone — keeping
+ * the bridge and re-attaching the thread — makes new models appear without
+ * restarting Zed.
+ */
+export const BRIDGE_COMMANDS: schema.AvailableCommand[] = [
+  {
+    name: RESTART_COMMAND,
+    description:
+      "Restart Kiro to load newly released models and changed agent or MCP settings; this thread continues",
+  },
+];
+
 /** Parsed form of a prompt that begins with a slash command. */
 export interface ParsedCommand {
   /** Command name without the leading slash, lower-cased. */
@@ -163,6 +183,11 @@ export function buildAvailableCommands(
 ): schema.AvailableCommand[] {
   const out: schema.AvailableCommand[] = [];
   const seen = new Set<string>();
+
+  for (const cmd of BRIDGE_COMMANDS) {
+    out.push(cmd);
+    seen.add(cmd.name);
+  }
 
   for (const cmd of kiroCommands) {
     const name = cmd.name.replace(/^\//, "");

@@ -177,6 +177,22 @@ export const KIRO_OPTION_COMMANDS = [
 export type KiroOptionCommand = (typeof KIRO_OPTION_COMMANDS)[number];
 
 /**
+ * Per-model reasoning metadata on a `commands/options {model}` entry.
+ *
+ * Added in kiro-cli 2.28 (absent on 2.21). `effortLevels` is the authoritative
+ * effort axis for that model, so the bridge no longer needs a separate
+ * `commands/options {effort}` round trip after every model switch. A model with
+ * no effort axis (`auto`) carries no `reasoning` block at all.
+ */
+export const kiroReasoningSchema = z
+  .object({
+    thinking: z.string().optional(),
+    effortLevels: z.array(z.string()).optional(),
+  })
+  .partial();
+export type KiroReasoning = z.infer<typeof kiroReasoningSchema>;
+
+/**
  * One selectable option.
  *
  * `group` carries semantic payload that varies by command: for `model` it is the
@@ -189,6 +205,7 @@ export const kiroOptionSchema = z.object({
   label: z.string().optional(),
   description: z.string().optional(),
   group: z.string().optional(),
+  reasoning: kiroReasoningSchema.optional(),
 });
 export type KiroOption = z.infer<typeof kiroOptionSchema>;
 
@@ -350,23 +367,32 @@ export type KiroModelListData = z.infer<typeof kiroModelListDataSchema>;
 export const kiroCommandStateSchema = z.object({
   agent: z.object({ name: z.string().optional() }).partial().optional(),
   model: z.object({ id: z.string().optional(), name: z.string().optional() }).partial().optional(),
+  /** 2.28+: `/model <id>` echoes the new model's effort axis here. */
+  reasoning: z.object({ effortLevels: z.array(z.string()).optional() }).partial().optional(),
   contextUsagePercentage: z.number().optional(),
 });
 export type KiroCommandState = z.infer<typeof kiroCommandStateSchema>;
 
+export interface CommandResultState {
+  modelId?: string;
+  agentId?: string;
+  contextUsagePercentage?: number;
+  /** Effort levels for the model the command switched to, when Kiro reported them. */
+  effortLevels?: string[];
+}
+
 /** Extracts authoritative model/agent ids from a command result, if present. */
-export function stateFromCommandResult(
-  data: unknown,
-): { modelId?: string; agentId?: string; contextUsagePercentage?: number } {
+export function stateFromCommandResult(data: unknown): CommandResultState {
   const parsed = kiroCommandStateSchema.safeParse(data);
   if (!parsed.success) return {};
-  const out: { modelId?: string; agentId?: string; contextUsagePercentage?: number } = {};
+  const out: CommandResultState = {};
   const modelId = parsed.data.model?.id ?? parsed.data.model?.name;
   if (modelId) out.modelId = modelId;
   if (parsed.data.agent?.name) out.agentId = parsed.data.agent.name;
   if (parsed.data.contextUsagePercentage !== undefined) {
     out.contextUsagePercentage = parsed.data.contextUsagePercentage;
   }
+  if (parsed.data.reasoning?.effortLevels) out.effortLevels = parsed.data.reasoning.effortLevels;
   return out;
 }
 

@@ -42,6 +42,16 @@ export const CONFIG_IDS = {
 
 export type ConfigId = (typeof CONFIG_IDS)[keyof typeof CONFIG_IDS];
 
+/**
+ * Kiro loads its model roster once per process, so a model released while Zed
+ * is running stays invisible until Kiro restarts. Saying so at the point of
+ * choosing a model is the cheapest discoverability there is.
+ */
+export const MODEL_OPTION_DESCRIPTION =
+  "Which model Kiro uses for this session. Newly released models appear after /restart-kiro.";
+export const AGENT_OPTION_DESCRIPTION = "Which Kiro agent handles this session";
+export const EFFORT_OPTION_DESCRIPTION = "How much reasoning effort the model should spend";
+
 // ---------------------------------------------------------------------------
 // Discovery
 // ---------------------------------------------------------------------------
@@ -64,8 +74,12 @@ export async function refreshModels(kiro: KiroConnection, session: BridgeSession
     description: stripActiveMarker(o.description),
   }));
   session.models.creditGroups.clear();
+  session.models.effortLevels.clear();
   for (const o of options) {
     if (o.group) session.models.creditGroups.set(o.value, o.group);
+    // 2.28+ reports each model's effort axis inline, which makes the separate
+    // `commands/options {effort}` round trip after every switch unnecessary.
+    if (o.reasoning?.effortLevels) session.models.effortLevels.set(o.value, o.reasoning.effortLevels);
   }
   const active = options.find(isActiveOption);
   if (active) session.models.currentModelId = active.value;
@@ -119,25 +133,87 @@ export async function refreshAgents(kiro: KiroConnection, session: BridgeSession
  *
  * An empty list is meaningful, not an error: the option must then be withdrawn
  * from Zed entirely rather than shown empty.
+ *
+ * The levels come from the per-model `reasoning` block when Kiro reports one
+ * (2.28+), and from `commands/options {effort}` otherwise.
  */
 export async function refreshEffort(kiro: KiroConnection, session: BridgeSession): Promise<void> {
-  const options = await kiro.commandOptions(session.sessionId, "effort");
-  session.effort.available = options.map((o) => o.value);
+  const { levels, active } = await effortAxisFor(kiro, session);
+  session.effort.available = levels;
 
-  if (session.effort.available.length === 0) {
+  if (levels.length === 0) {
     session.effort.current = undefined;
+    session.effort.confirmed = false;
     return;
   }
 
-  const active = options.find(isActiveOption);
   if (active) {
-    session.effort.current = active.value;
+    session.effort.current = active;
+    session.effort.confirmed = true;
     return;
   }
   // Kiro does not mark the active effort. Keep the current value when it is
-  // still valid; otherwise fall back to Kiro's own default.
-  if (session.effort.current && session.effort.available.includes(session.effort.current)) return;
-  session.effort.current = defaultEffortFor(session.effort.available);
+  // still valid; otherwise fall back to a documented default, marked as a guess.
+  if (session.effort.current && levels.includes(session.effort.current)) return;
+  session.effort.current = defaultEffortFor(levels);
+  session.effort.confirmed = false;
+}
+
+/** The effort axis of the current model, and the active level if Kiro marked one. */
+async function effortAxisFor(
+  kiro: KiroConnection,
+  session: BridgeSession,
+): Promise<{ levels: string[]; active?: string }> {
+  const model = session.models.currentModelId;
+  if (session.models.effortLevels.size > 0 && model) {
+    // Kiro reports reasoning per model, so absence from the map means the model
+    // has no effort axis — not that the data is missing.
+    return { levels: session.models.effortLevels.get(model) ?? [] };
+  }
+  const options = await kiro.commandOptions(session.sessionId, "effort");
+  const active = options.find(isActiveOption)?.value;
+  return active ? { levels: options.map((o) => o.value), active } : { levels: options.map((o) => o.value) };
+}
+
+/**
+ * Reconciles effort after the model changed.
+ *
+ * Kiro resets effort to the new model's own default on a switch. The bridge's
+ * contract is: an effort the *user chose* survives the switch when the new model
+ * supports it (re-applied to Kiro so the display stays true); a guessed effort is
+ * replaced by a fresh guess; and if the new model has no effort axis the option
+ * is withdrawn. Returns a notice when the user's choice could not be kept.
+ */
+export async function reconcileEffortAfterModelChange(
+  kiro: KiroConnection,
+  session: BridgeSession,
+  previous: { current: string | undefined; confirmed: boolean },
+  modelId: string,
+): Promise<string | undefined> {
+  session.effort.current = undefined;
+  session.effort.confirmed = false;
+  await refreshEffort(kiro, session);
+
+  const available = session.effort.available;
+  if (!previous.current) return undefined;
+
+  if (available.length === 0) {
+    return `Effort is not configurable for ${humaniseModelId(modelId)}; the effort selector is hidden for this model.`;
+  }
+  if (!available.includes(previous.current)) {
+    return (
+      `Effort **${humaniseEffort(previous.current)}** is not available for ${humaniseModelId(modelId)}; ` +
+      `switched to **${humaniseEffort(session.effort.current ?? "")}**.`
+    );
+  }
+  if (previous.confirmed) {
+    const res = await kiro.execute(session.sessionId, "effort", { level: previous.current });
+    if (res.success !== false) {
+      session.effort.current = previous.current;
+      session.effort.confirmed = true;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -170,7 +246,7 @@ export async function refreshAll(kiro: KiroConnection, session: BridgeSession): 
 // ---------------------------------------------------------------------------
 
 /** Groups Kiro options by their `group` label, preserving encounter order. */
-function groupOptions(
+export function groupOptions(
   entries: Array<{ value: string; name: string; description?: string | undefined; group?: string | undefined }>,
 ): schema.SessionConfigSelectOption[] | schema.SessionConfigSelectGroup[] {
   const anyGrouped = entries.some((e) => e.group);
@@ -234,7 +310,7 @@ export function buildConfigOptions(session: BridgeSession): schema.SessionConfig
     options.push({
       id: CONFIG_IDS.model,
       name: "Model",
-      description: "Which model Kiro uses for this session",
+      description: MODEL_OPTION_DESCRIPTION,
       category: "model",
       type: "select",
       currentValue: session.models.currentModelId,
@@ -342,27 +418,12 @@ async function applyModel(
   }
   if (session.models.currentModelId === modelId) return { changed: false };
 
-  const previousEffort = session.effort.current;
+  const previous = { current: session.effort.current, confirmed: session.effort.confirmed };
   await kiro.setModel(session.sessionId, modelId);
   session.models.currentModelId = modelId;
   session.bumpGeneration();
 
-  // Re-read the effort axis for the new model.
-  await refreshEffort(kiro, session);
-
-  let notice: string | undefined;
-  if (previousEffort && session.effort.available.length === 0) {
-    notice = `Effort is not configurable for ${humaniseModelId(modelId)}; the effort selector is hidden for this model.`;
-  } else if (
-    previousEffort &&
-    session.effort.available.length > 0 &&
-    !session.effort.available.includes(previousEffort)
-  ) {
-    notice =
-      `Effort **${humaniseEffort(previousEffort)}** is not available for ${humaniseModelId(modelId)}; ` +
-      `switched to **${humaniseEffort(session.effort.current ?? "")}**.`;
-  }
-
+  const notice = await reconcileEffortAfterModelChange(kiro, session, previous, modelId);
   return notice ? { changed: true, notice } : { changed: true };
 }
 
@@ -375,7 +436,9 @@ async function applyEffort(
   if (!session.effort.available.includes(level)) {
     throw new InvalidConfigValueError(CONFIG_IDS.effort, level, session.effort.available);
   }
-  if (session.effort.current === level) return { changed: false };
+  // Skip only when Kiro is *known* to be at this level. An unconfirmed value is
+  // the bridge's guess, so selecting it must still reach Kiro.
+  if (session.effort.current === level && session.effort.confirmed) return { changed: false };
 
   // There is no `session/set_effort`; effort is only reachable as a command.
   const res = await kiro.execute(session.sessionId, "effort", { level });
@@ -383,6 +446,7 @@ async function applyEffort(
     throw new InvalidConfigValueError(CONFIG_IDS.effort, level, session.effort.available);
   }
   session.effort.current = level;
+  session.effort.confirmed = true;
   session.bumpGeneration();
   return { changed: true };
 }
@@ -411,7 +475,14 @@ async function applyAgent(
 
   // Switching agent can change the model, because a Kiro agent config may pin
   // one. Re-read model and effort so the selectors cannot drift.
+  const modelBefore = session.models.currentModelId;
+  const previous = { current: session.effort.current, confirmed: session.effort.confirmed };
   await refreshModels(kiro, session).catch(() => undefined);
+  const modelAfter = session.models.currentModelId;
+  if (modelAfter && modelAfter !== modelBefore) {
+    const notice = await reconcileEffortAfterModelChange(kiro, session, previous, modelAfter).catch(() => undefined);
+    return notice ? { changed: true, notice } : { changed: true };
+  }
   await refreshEffort(kiro, session).catch(() => undefined);
 
   return { changed: true };

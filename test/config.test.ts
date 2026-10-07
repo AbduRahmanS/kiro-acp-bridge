@@ -207,13 +207,25 @@ describe("buildConfigOptions", () => {
 });
 
 describe("model switching invalidates effort — the critical interaction", () => {
-  it("preserves the effort level when the new model still supports it", async () => {
-    session.effort.current = "max";
+  it("keeps an effort the user chose when the new model supports it, re-applying it to Kiro", async () => {
+    await applyConfigOption(asKiro(kiro), session, "effort", "max");
+    kiro.calls = [];
     const res = await applyConfigOption(asKiro(kiro), session, "model", "gpt-5.6-sol");
     expect(res.changed).toBe(true);
     expect(session.models.currentModelId).toBe("gpt-5.6-sol");
     expect(session.effort.current).toBe("max");
+    expect(session.effort.confirmed).toBe(true);
+    // Kiro resets effort on a switch, so the choice must be sent again.
+    expect(kiro.calls).toContain('execute:effort:{"level":"max"}');
     expect(res.notice).toBeUndefined();
+  });
+
+  it("does not carry a guessed effort across a switch as if it were real", async () => {
+    expect(session.effort.confirmed).toBe(false);
+    kiro.calls = [];
+    await applyConfigOption(asKiro(kiro), session, "model", "gpt-5.6-sol");
+    expect(session.effort.confirmed).toBe(false);
+    expect(kiro.calls.filter((c) => c.startsWith("execute:effort"))).toEqual([]);
   });
 
   it("exposes `none` for GPT models but not for Claude", async () => {
@@ -292,11 +304,23 @@ describe("effort option", () => {
     ).rejects.toBeInstanceOf(InvalidConfigValueError);
   });
 
-  it("is a no-op when already at that level", async () => {
+  it("is a no-op when Kiro is known to be at that level", async () => {
+    await applyConfigOption(asKiro(kiro), session, "effort", "high");
     kiro.calls = [];
     const res = await applyConfigOption(asKiro(kiro), session, "effort", "high");
     expect(res.changed).toBe(false);
     expect(kiro.calls).toEqual([]);
+  });
+
+  it("still sends a level that is only the bridge's guess", async () => {
+    // `high` is displayed but never confirmed; Kiro may be on its own default.
+    expect(session.effort.current).toBe("high");
+    expect(session.effort.confirmed).toBe(false);
+    kiro.calls = [];
+    const res = await applyConfigOption(asKiro(kiro), session, "effort", "high");
+    expect(res.changed).toBe(true);
+    expect(kiro.calls).toContain('execute:effort:{"level":"high"}');
+    expect(session.effort.confirmed).toBe(true);
   });
 });
 
@@ -369,5 +393,56 @@ describe("refreshEffort resilience", () => {
     session.effort.current = "bogus";
     await refreshEffort(asKiro(kiro), session);
     expect(session.effort.current).toBe("high");
+  });
+});
+
+/**
+ * kiro-cli 2.28 reports each model's effort axis inline on
+ * `commands/options {model}` (captured: claude-opus-5.5 / claude-sonnet-5.5 carry
+ * `reasoning.effortLevels`; `auto` carries no `reasoning` block).
+ */
+class ReasoningKiro extends FakeKiro {
+  override async commandOptions(sessionId: string, command: string): Promise<KiroOption[]> {
+    const options = await super.commandOptions(sessionId, command);
+    if (command !== "model") return options;
+    return options.map((o) => {
+      const levels = FakeKiro.EFFORTS[o.value];
+      return levels && levels.length > 0 ? { ...o, reasoning: { thinking: "alwaysOn", effortLevels: levels } } : o;
+    });
+  }
+}
+
+describe("per-model reasoning from commands/options {model}", () => {
+  let rk: ReasoningKiro;
+  let rs: BridgeSession;
+
+  beforeEach(async () => {
+    rk = new ReasoningKiro();
+    rs = new BridgeSession("sess-r", "/work");
+    await refreshAll(asKiro(rk), rs);
+  });
+
+  it("records each model's effort levels", () => {
+    expect(rs.models.effortLevels.get("gpt-5.6-sol")).toContain("none");
+    expect(rs.models.effortLevels.has("auto")).toBe(false);
+  });
+
+  it("does not ask commands/options {effort} when the levels are already known", async () => {
+    expect(rk.calls).not.toContain("options:effort");
+    rk.calls = [];
+    await applyConfigOption(asKiro(rk), rs, "model", "gpt-5.6-sol");
+    expect(rk.calls).not.toContain("options:effort");
+    expect(rs.effort.available).toContain("none");
+  });
+
+  it("treats a model absent from the map as having no effort axis", async () => {
+    await applyConfigOption(asKiro(rk), rs, "model", "auto");
+    expect(rs.effort.available).toEqual([]);
+    expect(buildConfigOptions(rs).map((o) => o.id)).not.toContain("effort");
+  });
+
+  it("falls back to commands/options {effort} on a Kiro without per-model data", () => {
+    // The plain FakeKiro models 2.21, which never sends `reasoning`.
+    expect(kiro.calls).toContain("options:effort");
   });
 });

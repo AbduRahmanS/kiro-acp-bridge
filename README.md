@@ -31,11 +31,16 @@ unreachable) and [kiro#10034](https://github.com/kirodotdev/Kiro/issues/10034).
 This bridge sits between them and translates. Zed sees clean, standard ACP; Kiro keeps
 using the protocol it already implements.
 
+Kiro CLI 2.28's opt-in **CLI V3** engine speaks config options natively; the bridge has
+a separate V3 adapter that adds validation, command routes and a safe default, while Zed
+sees the same selectors and commands on either engine.
+
 ## What you get
 
 - **Native model picker** with Kiro's real models, discovered dynamically, showing
   each model's credit multiplier. Switch models mid-thread — no restart, no new
-  conversation.
+  conversation. Newly released models are detected in the background and appear in
+  new threads automatically; `/restart-kiro` loads them into an open thread.
 - **Native reasoning-effort picker** whose options are re-queried per model. GPT models
   offer `none`; Claude models do not; `auto` has no effort axis, so the selector is
   withdrawn and you are told why.
@@ -114,12 +119,13 @@ than a fork.
 
 | Component | Verified |
 |---|---|
-| Kiro CLI | 2.21.0, agent engine **v2** |
+| Kiro CLI | 2.28.0, engine **v2** (default) and **CLI V3** (opt-in) |
 | ACP | protocol version 1 (stable) |
-| SDK | `@agentclientprotocol/sdk` 1.4.0 |
+| SDK | `@agentclientprotocol/sdk` 1.7.0 |
 
-The v3 agent engine is **not** supported: its ACP surface is broken (`session/new`
-fails, all `_kiro.dev/*` methods return an internal error). The bridge pins v2.
+The CLI V3 engine is supported with `KIRO_BRIDGE_AGENT_ENGINE=v3` (or `auto`, which falls
+back to v2). v2 remains the default because V3 does not yet report token counts and lacks
+some v2 commands; see [compatibility](docs/compatibility.md#kiro-engine-versions).
 
 Feature detection is used throughout rather than version checks, so most Kiro updates
 need no change here. See [docs/compatibility.md](docs/compatibility.md).
@@ -175,15 +181,16 @@ More in [docs/debugging.md](docs/debugging.md).
 ```bash
 npm install
 npm run build
-npm test                      # 186 unit tests
+npm test                      # unit + fake-Kiro integration tests (no kiro-cli needed)
 node scripts/handshake.mjs    # real Kiro handshake, proves clean teardown
 ```
 
 End-to-end scripts under `scripts/` drive the built bridge through a simulated Zed
-against real Kiro. They use `KIRO_DATA_DIR` isolation so they never touch `~/.kiro`,
-and prefer the cheapest model to keep credit spend negligible.
+against real Kiro. They run Kiro under a sandbox `HOME` (`scripts/lib/sandbox.mjs`) so
+they never touch `~/.kiro`, and keep credit spend negligible.
 
 ```bash
+node scripts/e2e-engines.mjs    # v2 + CLI V3, /restart-kiro, ~/.kiro leak check
 node scripts/e2e-spine.mjs      # streaming, tools, permissions, paths, cancel
 node scripts/e2e-config.mjs     # model / effort / agent selectors
 node scripts/e2e-commands.mjs   # slash commands, skills, state sync

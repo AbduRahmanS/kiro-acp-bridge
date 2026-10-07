@@ -168,3 +168,22 @@ The 25 stray sessions are identifiable by cwd:
 
 They can be removed with `kiro-cli chat --delete-session <id>`. Because deletion is
 irreversible, this is left for the user to approve rather than done unilaterally.
+
+---
+
+# Correction 2 — kiro-cli 2.28 and the V3 engine
+
+Measured while adding CLI V3 support:
+
+| Mechanism | v2 | V3 |
+|---|---|---|
+| `KIRO_DATA_DIR` | sessions still written to `~/.kiro/sessions/cli` | — |
+| `KIRO_HOME` | — | **ignored**: sessions, `logs/`, `session-index/` written to the real `~/.kiro` |
+| `HOME` alone | isolates, but Kiro is signed out | same; V3 exits with "You are not logged in" |
+| fake `HOME` + symlinked data dir + symlinked `~/.local/bin` | isolated, signed in | isolated, signed in |
+
+The last row is now the only supported method (`scripts/lib/sandbox.mjs`), and
+`scripts/e2e-engines.mjs` asserts afterwards that nothing mentioning the sandbox reached
+the real `~/.kiro`. An early unisolated V3 probe did write two empty sessions, logs and a
+session index; those were identified by timestamp and content and removed, and
+`~/.kiro/settings/cli.json` was byte-identical throughout.

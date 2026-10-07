@@ -31,6 +31,18 @@ import {
   type KiroSessionList,
   type KiroUsageData,
 } from "./protocol.js";
+import {
+  detectDialect,
+  KIRO_V3_METHODS,
+  v3CompactSchema,
+  v3ContextShowSchema,
+  v3ExtensionMethods,
+  v3SessionResponseSchema,
+  v3SetConfigOptionResponseSchema,
+  type KiroDialect,
+  type V3ContextShow,
+  type V3SessionResponse,
+} from "./protocol-v3.js";
 
 /** Handlers the bridge must supply so Kiro's client-side calls reach Zed. */
 export interface KiroClientHandlers {
@@ -43,7 +55,15 @@ export interface KiroClientHandlers {
   releaseTerminal?(params: schema.ReleaseTerminalRequest): Promise<schema.ReleaseTerminalResponse>;
   waitForTerminalExit?(params: schema.WaitForTerminalExitRequest): Promise<schema.WaitForTerminalExitResponse>;
   killTerminal?(params: schema.KillTerminalRequest): Promise<schema.KillTerminalResponse>;
-  /** Any `_kiro.dev/*` or other unrecognised notification. */
+  /**
+   * Kiro asking the client for structured input. Forwarded to Zed, which only
+   * receives these when it advertised elicitation support itself.
+   */
+  createElicitation?(params: schema.CreateElicitationRequest): Promise<schema.CreateElicitationResponse>;
+  completeElicitation?(params: schema.CompleteElicitationNotification): Promise<void> | void;
+  /** CLI V3 `_kiro/openExternalUrl`: Kiro wants a URL opened (MCP OAuth). */
+  openExternalUrl?(params: unknown): Promise<Record<string, never>>;
+  /** Any `_kiro.dev/*` / `_kiro/*` or other unrecognised notification. */
   extensionNotification(method: string, params: unknown): void;
 }
 
@@ -65,6 +85,16 @@ export class KiroConnection {
 
   /** Spawns Kiro and establishes the client-side ACP connection. */
   static async spawn(options: KiroConnectionOptions): Promise<KiroConnection> {
+    return KiroConnection.spawnSync(options);
+  }
+
+  /**
+   * Synchronous form of {@link spawn}.
+   *
+   * Lets a caller hold the connection object before any child event can fire,
+   * so an exit handler can tell *which* process died.
+   */
+  static spawnSync(options: KiroConnectionOptions): KiroConnection {
     const proc = new KiroProcess(options);
     const { readable, writable } = proc.streams();
     const stream = ndJsonStream(writable, readable);
@@ -90,9 +120,20 @@ export class KiroConnection {
     if (h.waitForTerminalExit)
       app.onRequest("terminal/wait_for_exit", async (ctx) => await h.waitForTerminalExit!(ctx.params));
     if (h.killTerminal) app.onRequest("terminal/kill", async (ctx) => await h.killTerminal!(ctx.params));
+    if (h.createElicitation) {
+      app.onRequest("elicitation/create", async (ctx) => await h.createElicitation!(ctx.params));
+    }
+    if (h.completeElicitation) {
+      app.onNotification("elicitation/complete", async (ctx) => await h.completeElicitation!(ctx.params));
+    }
+    if (h.openExternalUrl) {
+      app.onRequest(KIRO_V3_METHODS.openExternalUrl, { parse: (p: unknown) => p }, async (ctx) =>
+        await h.openExternalUrl!(ctx.params),
+      );
+    }
 
-    // Kiro's extension notifications. Registered explicitly so the SDK routes
-    // them; unknown ones are still tolerated below.
+    // Kiro's extension notifications, both dialects. Registered explicitly so the
+    // SDK routes them; one dialect's names simply never arrive on the other.
     const extensionNotifications = [
       KIRO_METHODS.commandsAvailable,
       KIRO_METHODS.metadata,
@@ -104,6 +145,10 @@ export class KiroConnection {
       KIRO_METHODS.clearStatus,
       KIRO_METHODS.rateLimit,
       KIRO_METHODS.agentSwitched,
+      KIRO_V3_METHODS.mcpStatus,
+      KIRO_V3_METHODS.rateLimit,
+      KIRO_V3_METHODS.customAgentNotFound,
+      KIRO_V3_METHODS.customAgentConfigError,
     ];
     for (const method of extensionNotifications) {
       app.onNotification(method, { parse: (p: unknown) => p }, (ctx) => {
@@ -274,7 +319,73 @@ export class KiroConnection {
    * this module, per the compatibility policy.
    */
   async rawRequest<T = unknown>(method: string, params: unknown): Promise<T> {
+    this.diagnostics.trace("bridge->kiro", { method, params });
     return await this.agent.request<T>(method, params);
+  }
+
+  // -------------------------------------------------------------------------
+  // CLI V3 dialect
+  // -------------------------------------------------------------------------
+
+  /** Which server generation answered `initialize`. v2 until initialized. */
+  get dialect(): KiroDialect {
+    return detectDialect(this.initializeResult);
+  }
+
+  /** Optional `_kiro/*` methods this V3 server advertised. Empty on v2. */
+  get extensionMethods(): string[] {
+    return v3ExtensionMethods(this.initializeResult) ?? [];
+  }
+
+  async v3NewSession(params: schema.NewSessionRequest): Promise<V3SessionResponse> {
+    return v3SessionResponseSchema.parse(await this.rawRequest("session/new", params));
+  }
+
+  /** `session/load`. The response carries no `sessionId`; callers keep their own. */
+  async v3LoadSession(params: schema.LoadSessionRequest): Promise<V3SessionResponse> {
+    return v3SessionResponseSchema.parse((await this.rawRequest("session/load", params)) ?? {});
+  }
+
+  /** Native `session/set_config_option`. Returns Kiro's complete option array. */
+  async setConfigOption(
+    sessionId: string,
+    configId: string,
+    value: string | boolean,
+  ): Promise<Record<string, unknown>[]> {
+    const params =
+      typeof value === "boolean" ? { sessionId, configId, type: "boolean", value } : { sessionId, configId, value };
+    const raw = await this.rawRequest(KIRO_V3_METHODS.setConfigOption, params);
+    return v3SetConfigOptionResponseSchema.parse(raw ?? {}).configOptions;
+  }
+
+  async listSessions(params: schema.ListSessionsRequest): Promise<schema.ListSessionsResponse> {
+    return await this.rawRequest<schema.ListSessionsResponse>("session/list", params);
+  }
+
+  async closeSession(sessionId: string): Promise<void> {
+    await this.rawRequest("session/close", { sessionId });
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    await this.rawRequest("session/delete", { sessionId });
+  }
+
+  async v3ContextShow(sessionId: string): Promise<V3ContextShow> {
+    const raw = await this.rawRequest(KIRO_V3_METHODS.sessionContext, { sessionId, subcommand: "show" });
+    return v3ContextShowSchema.parse(raw ?? {});
+  }
+
+  async v3Compact(sessionId: string): Promise<{ success?: boolean | undefined; message?: string | undefined }> {
+    return v3CompactSchema.parse((await this.rawRequest(KIRO_V3_METHODS.sessionCompact, { sessionId })) ?? {});
+  }
+
+  /** `_kiro/account/getUsage`. Its `data` has the same shape as v2's `/usage`. */
+  async v3Usage(sessionId: string): Promise<KiroUsageData | undefined> {
+    const res = kiroExecuteResponseSchema.parse(
+      (await this.rawRequest(KIRO_V3_METHODS.accountGetUsage, { sessionId })) ?? {},
+    );
+    const parsed = kiroUsageDataSchema.safeParse(res.data);
+    return parsed.success ? parsed.data : undefined;
   }
 
   /** Shuts down the ACP connection and then the child process. */

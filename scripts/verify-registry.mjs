@@ -16,6 +16,7 @@
 import { execFile, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { promisify } from "node:util";
+import { sandboxEnv } from "./lib/sandbox.mjs";
 
 const execFileAsync = promisify(execFile);
 const ENTRY = "registry/kiro-acp-bridge";
@@ -62,10 +63,7 @@ function initializeOnce(env) {
 
 console.log("=== 1. authMethods with Kiro installed ===");
 {
-  const res = await initializeOnce({
-    KIRO_DATA_DIR: "/tmp/kiro-registry-check/datadir",
-    KIRO_DISABLE_TELEMETRY: "1",
-  });
+  const res = await initializeOnce(sandboxEnv());
   const methods = res.result?.authMethods ?? [];
   console.log(`  authMethods: ${JSON.stringify(methods)}`);
   check("initialize succeeded", !!res.result, JSON.stringify(res.error?.code));

@@ -28,6 +28,7 @@ export {
   CONFIG_IDS,
   defaultEffortFor,
   InvalidConfigValueError,
+  reconcileEffortAfterModelChange,
   refreshAgents,
   refreshAll,
   refreshContextWindows,
@@ -38,6 +39,14 @@ export {
   type ConfigId,
 } from "./bridge/config.js";
 export {
+  buildV3ConfigOptions,
+  buildV3ModeState,
+  effortAfterModelSwitch,
+  resolveV3Change,
+} from "./bridge/v3-config.js";
+export { buildV3AvailableCommands, planV3Command } from "./bridge/v3-commands.js";
+export { V3Adapter, type V3Host } from "./bridge/v3-adapter.js";
+export {
   humaniseAgentId,
   humaniseEffort,
   humaniseModelId,
@@ -45,7 +54,7 @@ export {
 } from "./bridge/labels.js";
 
 export { KiroConnection, type KiroClientHandlers, type KiroConnectionOptions } from "./kiro/connection.js";
-export { KiroProcess, DEFAULT_AGENT_ENGINE, type KiroProcessOptions } from "./kiro/process.js";
+export { KiroProcess, DEFAULT_AGENT_ENGINE, engineArgs, engineOrder, type KiroProcessOptions } from "./kiro/process.js";
 export {
   discoverKiroCli,
   KiroNotFoundError,
@@ -53,6 +62,7 @@ export {
   type DiscoveryResult,
 } from "./kiro/discovery.js";
 export * from "./kiro/protocol.js";
+export * from "./kiro/protocol-v3.js";
 
 export {
   Diagnostics,

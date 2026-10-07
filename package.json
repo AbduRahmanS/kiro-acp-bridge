@@ -1,6 +1,6 @@
 {
   "name": "kiro-acp-bridge",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Standards-compliant ACP bridge that gives Zed the full Kiro experience: native model, reasoning-effort and agent selectors plus dynamic slash commands, backed by kiro-cli.",
   "license": "Apache-2.0",
   "author": "Abdrahamane Sarambounou <abdrahaman.dev@gmail.com>",
@@ -48,16 +48,17 @@
     "probe": "node scripts/handshake.mjs",
     "verify:registry": "npm run build && node scripts/verify-registry.mjs",
     "e2e": "npm run build && node scripts/e2e-spine.mjs && node scripts/e2e-config.mjs && node scripts/e2e-commands.mjs && node scripts/e2e-usage.mjs && node scripts/e2e-failures.mjs && node scripts/e2e-auth.mjs",
+    "e2e:engines": "npm run build && node scripts/e2e-engines.mjs",
     "e2e:auth": "npm run build && node scripts/e2e-auth.mjs",
     "prepublishOnly": "npm run build && npm run test"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "1.4.0",
+    "@agentclientprotocol/sdk": "1.7.0",
     "zod": "3.25.76"
   },
   "devDependencies": {
     "@types/node": "22.13.14",
     "typescript": "5.7.3",
-    "vitest": "3.2.7"
+    "vitest": "5.0.3"
   }
 }

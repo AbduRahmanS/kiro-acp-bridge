@@ -13,6 +13,7 @@
  */
 import { mkdirSync, rmSync } from "node:fs";
 import { ZedSim, pidAlive } from "./lib/zed-sim.mjs";
+import { sandboxEnv } from "./lib/sandbox.mjs";
 
 const PROBE = "/tmp/kiro-bridge-config";
 const WS = `${PROBE}/ws`;
@@ -41,9 +42,7 @@ const zed = new ZedSim({
   cwd: WS,
   permissionPolicy: "reject",
   env: {
-    KIRO_DATA_DIR: `${PROBE}/datadir`,
-    KIRO_DISABLE_TELEMETRY: "1",
-    KIRO_DISABLE_SESSION_SEARCH_INDEX: "1",
+    ...sandboxEnv(),
     KIRO_BRIDGE_LOG_LEVEL: "warn",
   },
 }).start();

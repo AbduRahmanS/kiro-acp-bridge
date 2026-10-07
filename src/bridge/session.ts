@@ -13,7 +13,9 @@
  * `config_option_update` to Zed so its selectors can never disagree with Kiro.
  */
 
+import type * as schema from "@agentclientprotocol/sdk";
 import type { KiroCommand, KiroModelInfo, KiroMode } from "../kiro/protocol.js";
+import type { KiroV3McpServer } from "../kiro/protocol-v3.js";
 
 export interface SessionModelState {
   currentModelId: string | undefined;
@@ -22,6 +24,14 @@ export interface SessionModelState {
   creditGroups: Map<string, string>;
   /** Context window in tokens per model id, when known. */
   contextWindows: Map<string, number>;
+  /**
+   * Effort levels per model id, from `commands/options {model}`.
+   *
+   * Only populated when Kiro reports per-model reasoning (2.28+). When it does,
+   * a model *absent* from this map has no effort axis; when the map is empty the
+   * bridge falls back to asking `commands/options {effort}`.
+   */
+  effortLevels: Map<string, string[]>;
 }
 
 export interface SessionAgentState {
@@ -36,6 +46,41 @@ export interface SessionEffortState {
   current: string | undefined;
   /** Valid levels for the *current* model. Empty means no effort axis at all. */
   available: string[];
+  /**
+   * True only when Kiro is known to be running at `current`.
+   *
+   * The v2 engine never reports the active effort, so until the bridge has set a
+   * level itself `current` is a guess. Treating a guess as fact used to make an
+   * explicit choice of the guessed value a silent no-op, leaving Kiro on its own
+   * per-model default while Zed displayed something else.
+   */
+  confirmed: boolean;
+}
+
+/** State kept only for sessions running on the CLI V3 engine. */
+export interface V3SessionState {
+  /** Config options exactly as Kiro last reported them. The source of truth. Untrusted shape. */
+  native: Record<string, unknown>[];
+  /** True when the user chose the current effort level, so it survives a model switch. */
+  effortExplicit: boolean;
+  /** Commands Kiro advertised through `available_commands_update`. */
+  commands: schema.AvailableCommand[];
+  /** Latest `_kiro/mcp/status` snapshot, replaced wholesale on each notification. */
+  mcpServers: KiroV3McpServer[] | undefined;
+  /** MCP failures already shown in the thread, by server name, to avoid repeats. */
+  reportedMcpFailures: Map<string, string>;
+  /** Credits consumed by this session's turns, summed from `turn_completion`. */
+  creditsUsed: number;
+  /** Bridge-initiated changes in flight; Kiro's echoes are not forwarded meanwhile. */
+  mutating: number;
+  /**
+   * Incremented on every `config_option_update` from Kiro. A `set_config_option`
+   * response is only adopted if no notification overtook it, so a slower reply
+   * can never replace newer state.
+   */
+  nativeSeq: number;
+  /** Names of the last command catalogue sent, to avoid re-sending an identical one. */
+  commandSignature: string;
 }
 
 export class BridgeSession {
@@ -47,6 +92,7 @@ export class BridgeSession {
     availableModels: [],
     creditGroups: new Map(),
     contextWindows: new Map(),
+    effortLevels: new Map(),
   };
 
   readonly agents: SessionAgentState = {
@@ -58,6 +104,7 @@ export class BridgeSession {
   readonly effort: SessionEffortState = {
     current: undefined,
     available: [],
+    confirmed: false,
   };
 
   /** Slash commands Kiro advertised for this session. */
@@ -68,6 +115,43 @@ export class BridgeSession {
 
   /** Absolute token count from the last `/context` reading, when available. */
   usedTokens: number | undefined;
+
+  /**
+   * MCP servers the bridge forwarded to Kiro for this session.
+   *
+   * Kept so the session can be re-attached to a fresh Kiro process with the same
+   * inputs; CLI V3 in particular does not persist client-supplied servers.
+   */
+  mcpServers: schema.NewSessionRequest["mcpServers"] = [];
+
+  /**
+   * True when the Kiro process that owned this session has gone away (restart or
+   * crash). The next request re-attaches it with `session/load` before use.
+   */
+  detached = false;
+
+  /** A bridge notice to show the next time this thread is used (e.g. new models loaded). */
+  pendingNotice: string | undefined;
+
+  /**
+   * True while the bridge is re-attaching the session itself. Kiro replays the
+   * transcript during `session/load`; Zed already shows it, so transcript updates
+   * are dropped for the duration rather than duplicated in the thread.
+   */
+  suppressReplay = false;
+
+  /** Present only when the session runs on the CLI V3 engine. */
+  v3: V3SessionState | undefined;
+
+  /**
+   * False until Zed has received the `session/new` response.
+   *
+   * Kiro can emit state for a session before that response is sent, and Zed
+   * drops updates for a session id it has not seen. Updates the bridge produces
+   * meanwhile wait in `outbox` and are flushed, in order, once announced.
+   */
+  announced = false;
+  readonly outbox: schema.SessionUpdate[] = [];
 
   /**
    * Monotonic generation counter.

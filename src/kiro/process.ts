@@ -19,17 +19,40 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import type { Diagnostics } from "../diagnostics/logging.js";
 import { discoverKiroCli, type DiscoveryResult } from "./discovery.js";
+import { V3_LAUNCH_ARGS } from "./protocol-v3.js";
 
 /**
- * The agent engine to run Kiro with.
+ * The agent engine used when nothing is configured.
  *
- * Pinned to v2 deliberately. Probing v3 (kiro-cli 2.21.0) showed `session/new`
- * failing outright and every `_kiro.dev/*` extension rejected with an internal
- * "PersistenceClassification" error, which matches Kiro issues #10761/#10877.
- * v3 also moves extensions to a different `_kiro/*` namespace. Until v3's ACP
- * surface is usable, v2 is the only viable target.
+ * Still v2, deliberately. On kiro-cli 2.28 the V3 ACP server works and the
+ * bridge supports it (`KIRO_BRIDGE_AGENT_ENGINE=v3` or `auto`), but switching
+ * every existing user over silently would cost them things V3 does not yet
+ * offer: absolute token counts (so Zed's context ring), and several v2 slash
+ * commands with no V3 route. V3 is also still early access. See
+ * docs/compatibility.md for the trade-off and the trigger for flipping this.
  */
 export const DEFAULT_AGENT_ENGINE = "v2";
+
+/**
+ * Engines to try, in order, for a configured value.
+ *
+ * `auto` prefers V3 and falls back to v2 if V3 cannot start — for example on a
+ * kiro-cli that predates it. Any other value is tried alone, so an explicit
+ * choice never silently becomes something else.
+ */
+export function engineOrder(requested: string | undefined): string[] {
+  const value = (requested ?? "").trim().toLowerCase() || DEFAULT_AGENT_ENGINE;
+  return value === "auto" ? ["v3", "v2"] : [value];
+}
+
+/** `kiro-cli` arguments for an engine. V3 must not receive v2-only flags. */
+export function engineArgs(engine: string, extraArgs: readonly string[] = []): string[] {
+  const args = ["acp", "--agent-engine", engine];
+  if (engine === "v3") {
+    for (const a of V3_LAUNCH_ARGS) if (!extraArgs.includes(a)) args.push(a);
+  }
+  return [...args, ...extraArgs];
+}
 
 export interface KiroProcessOptions {
   /** Explicit executable path; otherwise discovered. */
@@ -53,6 +76,8 @@ const SIGTERM_GRACE_MS = 2000;
 export class KiroProcess {
   readonly discovery: DiscoveryResult;
   readonly args: readonly string[];
+  /** The `--agent-engine` value this process was launched with. */
+  readonly engine: string;
 
   private readonly child: ChildProcessWithoutNullStreams;
   private readonly diagnostics: Diagnostics;
@@ -69,8 +94,9 @@ export class KiroProcess {
     });
 
     const engine = options.agentEngine ?? DEFAULT_AGENT_ENGINE;
+    this.engine = engine;
     // Fixed argv array, never a shell string: no interpolation, no injection.
-    this.args = ["acp", "--agent-engine", engine, ...(options.extraArgs ?? [])];
+    this.args = engineArgs(engine, options.extraArgs);
 
     this.diagnostics.info("spawning kiro-cli", {
       path: this.discovery.path,
